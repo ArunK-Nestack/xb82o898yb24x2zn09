@@ -1,0 +1,88 @@
+name: evaluate-submission
+
+# Standalone public evaluation repo. Dispatched by the app (workflow_dispatch) when a candidate
+# submits a coding assignment. Runs the harness in this repo; the PRIVATE scoring prompts and
+# assignment PDFs are pulled from S3 at runtime (never committed to this public repo).
+#
+# PRIVACY: candidate data must NEVER reach the public Actions log. The pipeline's stdout/stderr is
+# redirected to a file; results go to the app ONLY via result.json -> callback. Only a redacted
+# error line is surfaced when a run fails.
+on:
+  workflow_dispatch:
+    inputs:
+      jobId:
+        description: EvaluationJob id (echoed back to the callback)
+        required: true
+      repoUrl:
+        description: Candidate GitHub repo / invitation URL
+        required: true
+
+# One evaluation at a time, FIFO (OpenAI rate limits). Relax the group to parallelise at scale.
+concurrency:
+  group: candidate-eval
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      # Private test bank: pull scoring prompts + assignment PDFs from S3 into the working dir so
+      # main.py reads them via its normal relative paths. These are NOT in this public repo.
+      - name: Fetch private eval assets from S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ vars.AWS_REGION || 'ap-south-1' }}
+          BUCKET: ${{ secrets.EVAL_ASSETS_BUCKET }}
+        run: |
+          aws s3 sync "s3://$BUCKET/eval-assets/prompts" prompts --only-show-errors
+          aws s3 sync "s3://$BUCKET/eval-assets/assignments" assignments --only-show-errors
+
+      # Inputs via env (NOT inline ${{ }}) so a crafted repoUrl can't inject shell.
+      # stdout+stderr -> file only: no candidate data in the public log. `|| true` keeps the step
+      # green; real status lives in result.json.
+      - name: Run evaluation (output suppressed to keep the public log clean)
+        env:
+          REPO_URL: ${{ inputs.repoUrl }}
+          GITHUB_TOKEN: ${{ secrets.EVAL_GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-4o-mini' }}
+        run: python main.py "$REPO_URL" > pipeline.log 2>&1 || true
+
+      # Surface ONLY a redacted error line if the run didn't succeed (for debugging).
+      - name: Surface errors only
+        if: always()
+        run: |
+          status="$(jq -r '.status // "error"' result.json 2>/dev/null || echo error)"
+          if [ "$status" != "ok" ]; then
+            echo "::error::evaluation failed for job ${{ inputs.jobId }}"
+            jq -r '.error // "no error detail in result.json"' result.json 2>/dev/null || echo "no result.json produced"
+          fi
+
+      - name: Report result to app
+        if: always()
+        env:
+          JOB_ID: ${{ inputs.jobId }}
+          CALLBACK_URL: ${{ secrets.EVAL_CALLBACK_URL }}
+          CALLBACK_SECRET: ${{ secrets.EVAL_CALLBACK_SECRET }}
+        run: |
+          if [ ! -f result.json ]; then
+            echo '{"status":"error","error":"pipeline produced no result.json"}' > result.json
+          fi
+          jq -c --arg id "$JOB_ID" '. + {jobId:$id}' result.json \
+            | curl -fsS -X POST "$CALLBACK_URL" \
+                -H "authorization: Bearer $CALLBACK_SECRET" \
+                -H "content-type: application/json" \
+                --data-binary @-

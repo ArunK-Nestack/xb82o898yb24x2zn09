@@ -1,5 +1,7 @@
+import re
 import sys
 import json
+import secrets
 from pathlib import Path
 
 from score_parse import parse_overall_score, redact_secrets
@@ -230,6 +232,40 @@ def _write_result(result: dict) -> None:
         print("Failed to write result.json:", str(error))
 
 
+# High-confidence prompt-injection markers. An honest code submission does not contain
+# "Overall Score: 100" or "ignore previous instructions", so a hit is treated as a manipulation
+# attempt: the score is WITHHELD (None) for human review, not silently zeroed (bounds false-positive harm).
+_INJECTION_MARKERS = re.compile(
+    r"(?im)(?:"
+    r"FINAL_SCORE\s*\[|"
+    r"Overall Score\s*:\s*\d|"
+    r"\b(?:ignore|disregard|forget)\b[^\n]{0,40}\b(?:instruction|rubric|prompt)|"
+    r"\b(?:award|give|assign|set)\b[^\n]{0,40}\b(?:full marks|100\s*/\s*100|perfect score|maximum score)"
+    r")"
+)
+
+
+def scan_candidate_content_for_injection(repo_evidence: dict) -> list[str]:
+    """Return high-confidence grader-manipulation snippets found in candidate-controlled content."""
+    hits: list[str] = []
+
+    def _scan(label: str, text) -> None:
+        if isinstance(text, str):
+            for match in _INJECTION_MARKERS.finditer(text):
+                hits.append(f"{label}: {match.group(0).strip()[:80]}")
+
+    _scan("README", repo_evidence.get("readmeText"))
+    _scan("package.json", repo_evidence.get("packageJsonText"))
+    _scan("results.json", repo_evidence.get("resultsJsonText"))
+
+    for group in ("sourceFiles", "testFiles", "configFiles"):
+        for path, content in (repo_evidence.get(group) or {}).items():
+            _scan(str(path)[:60], content)
+            _scan("filename", str(path))
+
+    return hits[:20]
+
+
 def main():
     repo_evidence = None
     # Default to error; each terminal branch overwrites this. Written in `finally`.
@@ -307,20 +343,45 @@ def main():
 
         print_pre_evaluation_result(weak_signal_scan)
 
+        # Per-run, unguessable token. The grader is told to emit the authoritative score as
+        # "FINAL_SCORE[<nonce>]: <N>"; parse_overall_score trusts only that anchored line, so a
+        # candidate cannot forge a passing score by writing "Overall Score: 100" in their repo.
+        nonce = secrets.token_hex(8)
+
         final_report = run_final_assessment_evaluation(
             repo_evidence,
             assessment_type,
             deployment_results,
             weak_signal_scan,
             assignment_pdf,
+            nonce=nonce,
         )
         print_final_assessment_report(final_report)
 
-        # The final report header is "Overall Score: <N> / 100" (see final_assessment_evaluator).
+        # Trust only the nonce-anchored score line (see final_assessment_evaluator).
+        score = parse_overall_score(final_report, nonce=nonce)
+
+        # If the submission tried to manipulate the grader, withhold the score for human review
+        # instead of auto-advancing on it (score=None -> the app leaves it for manual review).
+        injection_hits = scan_candidate_content_for_injection(repo_evidence)
+        if injection_hits:
+            print("")
+            print("INTEGRITY WARNING: possible grader-manipulation content detected.")
+            for hit in injection_hits:
+                print("-", hit)
+            final_report = (
+                "[INTEGRITY WARNING] Possible prompt-injection / grader-manipulation content was "
+                "detected in the submission. Score withheld for human review.\n"
+                + "\n".join(f"- {hit}" for hit in injection_hits)
+                + "\n\n"
+                + final_report
+            )
+            score = None
+
         result.update(
             status="ok",
             rejected=False,
-            score=parse_overall_score(final_report),
+            score=score,
             report=final_report,
         )
     except Exception as error:

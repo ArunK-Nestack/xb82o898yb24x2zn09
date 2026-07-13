@@ -17,9 +17,11 @@ on:
         description: Candidate GitHub repo / invitation URL
         required: true
 
-# One evaluation at a time, FIFO (OpenAI rate limits). Relax the group to parallelise at scale.
+# Per-job group so simultaneous submissions run in parallel instead of cancelling each other.
+# (A shared group keeps only 1 pending and cancels the rest — it does NOT queue.) GitHub's
+# account-level concurrency bounds the real parallelism and queues any excess.
 concurrency:
-  group: candidate-eval
+  group: eval-${{ inputs.jobId }}
   cancel-in-progress: false
 
 jobs:

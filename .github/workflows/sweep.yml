@@ -1,0 +1,19 @@
+name: eval-sweep
+
+# Backstop for the evaluation queue. The app dispatches on submit (primary, instant); this cron
+# just mops up jobs whose dispatch failed or whose run got killed. It calls the app's existing
+# sweeper, which requeues stuck runs and (re)dispatches QUEUED jobs. Idempotent: only touches
+# QUEUED/stuck rows, never re-evaluates a DONE one.
+on:
+  schedule:
+    - cron: '0 */2 * * *' # every 2 hours
+  workflow_dispatch: # allow a manual sweep
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Drain the evaluation queue
+        run: |
+          curl -fsS -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            https://neilp.nestack.ai/api/cron/run-evaluation

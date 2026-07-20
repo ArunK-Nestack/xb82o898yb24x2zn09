@@ -76,14 +76,28 @@ def accept_github_invitation(github_url: str) -> dict:
     github_user = user_response.json()
     print("Authenticated GitHub user:", github_user.get("login"))
 
-    invitations_response = github_request("GET", "/user/repository_invitations")
-
-    if not invitations_response.ok:
-        raise RuntimeError(
-            f"Failed to fetch invitations: {invitations_response.status_code} {invitations_response.text}"
+    # Paginate: the API returns max 100/page (default 30). With a backlog of pending
+    # invitations, a new candidate's invite lands on a later page and would never be seen.
+    invitations = []
+    page = 1
+    while True:
+        invitations_response = github_request(
+            "GET", f"/user/repository_invitations?per_page=100&page={page}"
         )
 
-    invitations = invitations_response.json()
+        if not invitations_response.ok:
+            raise RuntimeError(
+                f"Failed to fetch invitations: {invitations_response.status_code} {invitations_response.text}"
+            )
+
+        batch = invitations_response.json()
+        invitations.extend(batch)
+
+        if len(batch) < 100:
+            break
+
+        page += 1
+
     print("Pending invitations found:", len(invitations))
 
     matched_invitation = None

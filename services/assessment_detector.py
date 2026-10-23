@@ -1,3 +1,6 @@
+import re
+
+
 def get_text(value) -> str:
     if not value:
         return ""
@@ -98,15 +101,16 @@ def detect_assessment_type_with_evidence(repo_evidence: dict) -> dict:
     if contains_any(full, ["free", "paid", "endpoint type", "window_seconds"]):
         add_score(scores, "rate-limiter", 10, "Tier/window rule evidence found.")
 
-    # Robust OTP
+    # Robust OTP. Brute-force, constant-time and hashing evidence only counts when OTP is mentioned:
+    # the cybersecurity build is required to use all three for passwords and session tokens.
     if contains_any(full, ["abuse-resistant otp", "abuse resistant otp", "otp"]):
         add_score(scores, "robust-otp", 20, "OTP wording found.")
-    if contains_any(full, ["brute-force", "brute force", "verify otp", "send otp"]):
-        add_score(scores, "robust-otp", 15, "OTP send/verify/brute-force evidence found.")
-    if contains_any(full, ["constant-time", "constant time", "timingsafeequal", "compare_digest"]):
-        add_score(scores, "robust-otp", 15, "Constant-time comparison evidence found.")
-    if contains_any(full, ["bcrypt", "sha-256", "sha256", "hashed otp", "code invalidation"]):
-        add_score(scores, "robust-otp", 15, "OTP hashing/invalidation evidence found.")
+        if contains_any(full, ["brute-force", "brute force", "verify otp", "send otp"]):
+            add_score(scores, "robust-otp", 15, "OTP send/verify/brute-force evidence found.")
+        if contains_any(full, ["constant-time", "constant time", "timingsafeequal", "compare_digest"]):
+            add_score(scores, "robust-otp", 15, "Constant-time comparison evidence found.")
+        if contains_any(full, ["bcrypt", "sha-256", "sha256", "hashed otp", "code invalidation"]):
+            add_score(scores, "robust-otp", 15, "OTP hashing/invalidation evidence found.")
 
     # Data extractor
     if contains_any(full, ["structured data extractor", "data extractor"]):
@@ -131,6 +135,11 @@ def detect_assessment_type_with_evidence(repo_evidence: dict) -> dict:
         add_score(scores, "cybersecurity-secure-api", 15, "Role / privilege-escalation handling found.")
     if contains_any(code, ["bcrypt", "argon2", "scrypt"]) and contains_any(code, ["/records", "owner"]):
         add_score(scores, "cybersecurity-secure-api", 10, "Password hashing alongside record ownership found.")
+    if all(route in code for route in ["/register", "/login", "/records"]):
+        add_score(scores, "cybersecurity-secure-api", 20, "Required register/login/records route set found.")
+    # Ownership check under any field name, e.g. rec['user_id'] != g.user.id or note.userId !== req.user.id.
+    if re.search(r"(owner\w*|user_?id)['\"\]]*\s*(!==?|===?)", code):
+        add_score(scores, "cybersecurity-secure-api", 15, "Owner/user id comparison found.")
 
     # Vectorization common
     vector_common = contains_any(full, [

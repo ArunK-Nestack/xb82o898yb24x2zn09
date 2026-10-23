@@ -9,6 +9,7 @@ ASSIGNMENT_PDF_MAP = {
     "langchain-vectorization": "langchain-vectorization.pdf",
     "robust-otp": "robust-otp.pdf",
     "data-extractor": "data-extractor.pdf",
+    "cybersecurity-secure-api": "cybersecurity-secure-api.pdf",
 }
 
 

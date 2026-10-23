@@ -108,7 +108,7 @@ Endpoint correctness criteria:
 Results.json criteria:
 - Apply results.json scoring only when the assessment prompt or assignment PDF requires results.json.
 - For vectorization and data-extractor assignments, results.json must be present, complete, and semantically correct for the required number of inputs or queries.
-- For webhook, rate-limiter, and OTP assignments, do not penalize missing results.json unless the selected rubric explicitly requires it.
+- For webhook, rate-limiter, OTP, and cybersecurity secure-API assignments, do not penalize missing results.json unless the selected rubric explicitly requires it.
 - If results.json is required and is missing, incomplete, malformed, empty, or not clearly relevant, apply the hard rule from the assessment prompt.
 
 Configuration criteria:

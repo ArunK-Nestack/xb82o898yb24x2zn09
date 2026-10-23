@@ -26,6 +26,31 @@ SECURE_API = evidence(
     files=["app/routes.py", "app/auth.py"],
 )
 
+# Follows the PDF's routes but with a terse README and user_id instead of owner_id. bcrypt, brute
+# force and compare_digest used to hand this to robust-otp 45 vs 30.
+SECURE_API_TERSE = evidence(
+    readme="# My submission\nPOST /register, POST /login, POST /records, GET /records/:id.\n"
+    "Passwords use bcrypt. 5 failed logins -> 429 to stop brute force. Tokens compared with hmac.compare_digest.",
+    sources={
+        "app.py": "@app.post('/records')\n@app.get('/records/<rid>')\n"
+        "if rec['user_id'] != g.user['id']: abort(404)\nbcrypt.checkpw(pw, h)\nhmac.compare_digest(sig, expected)",
+    },
+    files=["app.py", "README.md"],
+)
+
+# Node build of the brief: userId comparison, timingSafeEqual, signed tokens, login attempt counter.
+SECURE_API_NODE = evidence(
+    readme="Run with npm start. Lockout after 5 failed attempts returns 429 (brute-force protection).",
+    sources={
+        "src/routes.js": "router.post('/register', register)\nrouter.post('/login', login)\n"
+        "router.post('/records', auth, create)\nrouter.get('/records/:id', auth, (req, res) => {\n"
+        "  if (rec.userId !== req.user.id && req.user.role !== 'admin') return res.status(403).end() })",
+        "src/auth.js": "const ok = await bcrypt.compare(pw, user.hash)\ncrypto.timingSafeEqual(sig, expected)\n"
+        "user.loginAttempts += 1 // signature verified on every request",
+    },
+    files=["src/routes.js", "src/auth.js", "package.json"],
+)
+
 OTP = evidence(
     readme="# Abuse-resistant OTP\nSend OTP and verify OTP with brute-force lockout after 5 attempts, "
     "returns 429. bcrypt hashed OTP, constant-time compare_digest. CSPRNG via secrets.token_bytes.",
@@ -39,6 +64,8 @@ WEBHOOK = evidence(
 
 CASES = [
     (SECURE_API, "cybersecurity-secure-api"),
+    (SECURE_API_TERSE, "cybersecurity-secure-api"),
+    (SECURE_API_NODE, "cybersecurity-secure-api"),
     (OTP, "robust-otp"),
     (WEBHOOK, "webhook"),
 ]

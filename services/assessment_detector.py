@@ -75,6 +75,7 @@ def detect_assessment_type_with_evidence(repo_evidence: dict) -> dict:
         "langchain-vectorization": {"score": 0, "evidence": []},
         "robust-otp": {"score": 0, "evidence": []},
         "data-extractor": {"score": 0, "evidence": []},
+        "cybersecurity-secure-api": {"score": 0, "evidence": []},
     }
 
     # Webhook
@@ -116,6 +117,20 @@ def detect_assessment_type_with_evidence(repo_evidence: dict) -> dict:
         add_score(scores, "data-extractor", 25, "Confidence/review flag evidence found.")
     if contains_any(full, ["invoice_number", "amount", "currency", "date"]):
         add_score(scores, "data-extractor", 10, "Structured extraction field evidence found.")
+
+    # Secure Records API (Cybersecurity). The distinctive shape is per-user record ownership plus
+    # a server-assigned admin role; bcrypt/429 alone would collide with the OTP build, so they are
+    # not enough on their own.
+    if contains_any(full, ["secure records api", "records api", "multi-tenant", "multi tenant"]):
+        add_score(scores, "cybersecurity-secure-api", 15, "Records API wording found.")
+    if contains_any(code, ["/records", "owner_id", "ownerid", "owner_id ==", "record.owner"]):
+        add_score(scores, "cybersecurity-secure-api", 20, "Per-record ownership route/field found.")
+    if contains_any(full, ["access control", "broken access control", "object-level", "object level", "idor"]):
+        add_score(scores, "cybersecurity-secure-api", 15, "Access-control wording found.")
+    if contains_any(full, ["role", "admin"]) and contains_any(full, ["privilege", "escalation", "cannot set", "server-side only", "server side only"]):
+        add_score(scores, "cybersecurity-secure-api", 15, "Role / privilege-escalation handling found.")
+    if contains_any(code, ["bcrypt", "argon2", "scrypt"]) and contains_any(code, ["/records", "owner"]):
+        add_score(scores, "cybersecurity-secure-api", 10, "Password hashing alongside record ownership found.")
 
     # Vectorization common
     vector_common = contains_any(full, [

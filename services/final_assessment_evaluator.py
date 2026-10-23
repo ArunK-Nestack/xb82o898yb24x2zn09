@@ -16,6 +16,7 @@ PROMPT_FILE_MAP = {
     "langchain-vectorization": "langchain-vectorization.txt",
     "robust-otp": "robust-otp.txt",
     "data-extractor": "data-extractor.txt",
+    "cybersecurity-secure-api": "cybersecurity-secure-api.txt",
 }
 
 
@@ -537,6 +538,38 @@ B10:
 - Docker credit only if Dockerfile/docker-compose exists.
 """.strip()
 
+    secure_api_rules = """
+SECURE RECORDS API CALIBRATION
+
+A1:
+- Full only with a slow salted hash (bcrypt/scrypt/Argon2).
+- Plaintext password storage makes A1 = 0.
+- A fast hash (MD5/SHA-1/bare SHA-256) for passwords caps A1 at partial.
+- Any auth library (Passport, NextAuth, Firebase Auth, Django Allauth, Flask-Login) makes A1 and A5 = 0.
+
+A2:
+- Full only if the read path compares the record owner to the authenticated user and refuses others with 403/404.
+- A check that only confirms a session exists is A2 = 0.
+- Returning another user's record on request is A2 = 0.
+- Any string-concatenated query using user input caps A2 at partial.
+
+A3:
+- Full only if role is assigned server-side and cannot be set from the request body.
+- Reading role from the registration or profile body makes A3 = 0.
+
+A4:
+- Full only if failed logins lock or slow the account, return 429, and track per account (not per IP).
+
+A5:
+- Full only with an opaque CSPRNG server-side token or a signature verified on every request; a forged or absent token returns 401.
+
+B4:
+- Any string-concatenated query using user input makes B4 = 0.
+
+B9:
+- No tests = 0. Happy-path only = partial. A security-rule test (cross-user denial, escalation block, or lockout) is required for full.
+""".strip()
+
     specific_rules = {
         "webhook": webhook_rules,
         "rate-limiter": rate_limiter_rules,
@@ -544,6 +577,7 @@ B10:
         "langchain-vectorization": langchain_vector_rules,
         "robust-otp": otp_rules,
         "data-extractor": data_extractor_rules,
+        "cybersecurity-secure-api": secure_api_rules,
     }
 
     return f"""
@@ -782,6 +816,14 @@ OTP bonus examples:
 +1: Admin/debug-safe screen showing rate-limit state without exposing OTP.
 +1: Better audit logs without leaking sensitive data.
 +1: Demo script proving brute-force and resend-limit behavior.
+""".strip(),
+
+        "cybersecurity-secure-api": """
+Secure Records API bonus examples:
++1 to +2: Centralised authorization middleware/decorator reused across routes.
++1: Audit log of access-control denials without leaking record contents.
++1: Tests that prove a user cannot read another user's record and cannot self-promote to admin.
++1: Rate-limit / lockout state inspectable safely without exposing secrets.
 """.strip(),
 
         "data-extractor": """
